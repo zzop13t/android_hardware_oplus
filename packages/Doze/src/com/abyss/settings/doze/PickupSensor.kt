@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-package org.lineageos.settings.doze
+package com.abyss.settings.doze
 
 import android.content.Context
 import android.hardware.Sensor
@@ -30,6 +30,21 @@ class PickupSensor(
     private val executorService = Executors.newSingleThreadExecutor()
     private var entryTimestamp = 0L
 
+    // 用近距离传感器做"贴身/口袋"判断：贴脸时不唤醒（上游是靠 Lineage 给 framework 打的补丁做的）
+    private val proximitySensor =
+        Utils.getSensor(sensorManager, context.resources.getString(R.string.pocket_sensor_type))
+    private val proximityValue = context.resources.getFloat(R.dimen.pocket_sensor_value)
+    @Volatile private var proximityCovered = false
+
+    private val proximityListener =
+        object : SensorEventListener {
+            override fun onSensorChanged(event: SensorEvent) {
+                proximityCovered = event.values[0] <= proximityValue
+            }
+
+            override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) {}
+        }
+
     override fun onSensorChanged(event: SensorEvent) {
         if (DEBUG) Log.d(TAG, "Got sensor event: ${event.values[0]}")
         val delta = SystemClock.elapsedRealtime() - entryTimestamp
@@ -39,13 +54,20 @@ class PickupSensor(
         entryTimestamp = SystemClock.elapsedRealtime()
         if (event.values[0] == sensorValue) {
             if (Utils.isPickUpSetToWake(context)) {
-                wakeLock.acquire(WAKELOCK_TIMEOUT_MS)
-                powerManager.wakeUpWithProximityCheck(
-                    SystemClock.uptimeMillis(),
-                    PowerManager.WAKE_REASON_GESTURE,
-                    TAG,
-                    Display.DEFAULT_DISPLAY,
-                )
+                if (proximityCovered) {
+                    // 贴着东西（口袋/遮住）：不亮屏
+                    if (DEBUG) Log.d(TAG, "Pick-up ignored: proximity covered")
+                } else {
+                    wakeLock.acquire(WAKELOCK_TIMEOUT_MS)
+                    // 上游用的是 LineageOS 给 framework 加的 wakeUpWithProximityCheck()，
+                    // AOSP 没有；这里自己查 proximity 后调用 AOSP 的 wakeUp()
+                    powerManager.wakeUp(
+                        SystemClock.uptimeMillis(),
+                        PowerManager.WAKE_REASON_GESTURE,
+                        TAG,
+                        Display.DEFAULT_DISPLAY,
+                    )
+                }
             } else {
                 Utils.launchDozePulse(context)
             }
@@ -62,12 +84,24 @@ class PickupSensor(
                 sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_NORMAL)
             }
         }
+        if (proximitySensor != null) {
+            executorService.submit {
+                sensorManager.registerListener(
+                    proximityListener,
+                    proximitySensor,
+                    SensorManager.SENSOR_DELAY_NORMAL,
+                )
+            }
+        }
     }
 
     fun disable() {
         if (sensor != null) {
             Log.d(TAG, "Disabling")
             executorService.submit { sensorManager.unregisterListener(this, sensor) }
+        }
+        if (proximitySensor != null) {
+            executorService.submit { sensorManager.unregisterListener(proximityListener, proximitySensor) }
         }
     }
 
