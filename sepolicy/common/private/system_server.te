@@ -1,0 +1,11 @@
+allow system_server storage_stub_file:dir getattr;
+
+allow system_server adbroot_service:service_manager find;
+
+# Use HALs
+
+# Let system server find camera properties
+get_prop(system_server, camera2_extensions_prop)
+
+# Let system server toggle xtra-daemon
+set_prop(system_server, xtra_control_prop)

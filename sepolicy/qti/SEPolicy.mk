@@ -29,4 +29,5 @@ SYSTEM_EXT_PUBLIC_SEPOLICY_DIRS += \
     hardware/oplus/sepolicy/qti/public/common-um
 endif
 
-include device/lineage/sepolicy/libperfmgr/sepolicy.mk
+# Abyss: libperfmgr 版 power HAL 不随本 ROM 发布（设备用的是 power-service-qti）
+# include device/lineage/sepolicy/libperfmgr/sepolicy.mk
